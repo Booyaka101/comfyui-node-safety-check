@@ -150,6 +150,53 @@
     .trust span { display: inline-flex; align-items: center; gap: 6px; }
     .trust span svg { width: 13px; height: 13px; color: var(--ok); }
 
+    /* Settings disclosure */
+    details.settings { margin-top: 10px; }
+    details.settings summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12.5px;
+      padding: 4px 0;
+      list-style: none;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    details.settings summary::-webkit-details-marker { display: none; }
+    details.settings summary:hover { color: var(--fg); }
+    details.settings summary::before { content: "▸"; font-size: 10px; transition: transform .15s; }
+    details.settings[open] summary::before { transform: rotate(90deg); }
+    details.settings .pat-panel {
+      margin-top: 12px;
+      padding: 14px;
+      background: var(--bg);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+    }
+    details.settings .pat-panel p { margin: 0 0 10px; font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+    details.settings .pat-panel p:last-of-type { margin-bottom: 0; }
+    details.settings input[type="password"] {
+      width: 100%;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--fg);
+      font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+      margin-bottom: 8px;
+    }
+    details.settings label.remember {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12.5px; color: var(--muted);
+      cursor: pointer;
+    }
+    .rate-limit {
+      display: inline-flex; align-items: center; gap: 4px;
+      font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted);
+      margin-left: auto;
+    }
+    .rate-limit.warn { color: var(--warn); }
+    .rate-limit.err  { color: var(--crit); }
+
     /* Status */
     .status-line {
       font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -284,7 +331,21 @@
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>No data leaves your browser</span>
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Reads public GitHub files only</span>
         <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Open-source, auditable</span>
+        <span class="rate-limit" id="rate-limit" title="GitHub API rate-limit status"></span>
       </div>
+
+      <details class="settings" id="settings">
+        <summary>Lift rate limit (60/hr anonymous → 5,000/hr authenticated)</summary>
+        <div class="pat-panel">
+          <p>Paste a GitHub Personal Access Token below. Token is sent only to <code>api.github.com</code> as an <code>Authorization</code> header and is otherwise stored only in your browser's <code>localStorage</code>. It never reaches any other server.</p>
+          <p>Create one at <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">github.com/settings/tokens</a> with <b>no scopes</b> selected (fine-grained tokens) or just <code>public_repo</code> read (classic) — this tool only reads public files.</p>
+          <input id="pat-input" type="password" placeholder="ghp_… or github_pat_…" autocomplete="off" spellcheck="false" />
+          <label class="remember">
+            <input id="pat-remember" type="checkbox" />
+            Remember on this device (browser localStorage)
+          </label>
+        </div>
+      </details>
     </div>
 
     <div class="input-panel hidden" id="panel-paste">
@@ -673,21 +734,46 @@
     return null;
   }
 
+  function ghHeaders() {
+    const token = getPat();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  function updateRateLimit(res) {
+    const remaining = res.headers.get("x-ratelimit-remaining");
+    const limit = res.headers.get("x-ratelimit-limit");
+    const reset = res.headers.get("x-ratelimit-reset");
+    const el = document.getElementById("rate-limit");
+    if (!el || remaining == null) return;
+    const remN = parseInt(remaining, 10);
+    el.textContent = `GitHub API: ${remaining}/${limit}`;
+    el.classList.toggle("warn", remN > 0 && remN < 10);
+    el.classList.toggle("err", remN === 0);
+    if (reset) {
+      const resetDate = new Date(parseInt(reset, 10) * 1000);
+      el.title = `Resets at ${resetDate.toLocaleTimeString()}`;
+    }
+  }
+
   async function fetchRepoTree(owner, repo, ref) {
     setStatus(`Fetching repo metadata for <code>${owner}/${repo}</code> …`);
-    const metaRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
+    const headers = ghHeaders();
+    const metaRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
+    updateRateLimit(metaRes);
     if (!metaRes.ok) {
       const msg = metaRes.status === 404 ? "repo not found or private" :
-                  metaRes.status === 403 ? "GitHub API rate-limit reached (try again later, or use Paste source mode)" :
+                  metaRes.status === 401 ? "GitHub rejected the authentication token. Check it under the Lift-rate-limit panel." :
+                  metaRes.status === 403 ? "GitHub API rate-limit reached. Open the “Lift rate limit” panel above to paste a token, or switch to Paste source mode." :
                   `GitHub returned ${metaRes.status}`;
       throw new Error(msg);
     }
     const meta = await metaRes.json();
     const branch = ref || meta.default_branch;
     setStatus(`Listing files in <code>${owner}/${repo}@${branch}</code> …`);
-    const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`);
+    const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`, { headers });
+    updateRateLimit(treeRes);
     if (!treeRes.ok) {
-      throw new Error(treeRes.status === 403 ? "GitHub API rate-limit reached" : `tree fetch failed (${treeRes.status})`);
+      throw new Error(treeRes.status === 403 ? "GitHub API rate-limit reached. Open the “Lift rate limit” panel above to paste a token." : `tree fetch failed (${treeRes.status})`);
     }
     const tree = await treeRes.json();
     return { branch, meta, tree };
@@ -867,6 +953,21 @@
     summarize(findings, arr.length, totalLines, null);
   }
 
+  // PAT storage. Held in memory by default; persisted to localStorage only
+  // if the user explicitly opts in via the "Remember" checkbox.
+  let _patInMemory = null;
+  function getPat() {
+    if (_patInMemory) return _patInMemory;
+    try { return localStorage.getItem("ghpat") || null; } catch { return null; }
+  }
+  function setPat(token, persist) {
+    _patInMemory = token || null;
+    try {
+      if (persist && token) localStorage.setItem("ghpat", token);
+      else localStorage.removeItem("ghpat");
+    } catch { /* private mode etc. */ }
+  }
+
   // Wiring
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -889,6 +990,19 @@
   dropEl.addEventListener("dragleave", () => dropEl.classList.remove("hover"));
   dropEl.addEventListener("drop", (e) => { e.preventDefault(); dropEl.classList.remove("hover"); if (e.dataTransfer?.files) runFileScan(e.dataTransfer.files); });
   fileEl.addEventListener("change", () => { if (fileEl.files) runFileScan(fileEl.files); });
+
+  // PAT input + checkbox wiring
+  const patInput = document.getElementById("pat-input");
+  const patRemember = document.getElementById("pat-remember");
+  const existingPat = (() => { try { return localStorage.getItem("ghpat"); } catch { return null; } })();
+  if (existingPat) {
+    patInput.value = existingPat;
+    patRemember.checked = true;
+    _patInMemory = existingPat;
+    document.getElementById("settings").open = true;
+  }
+  patInput.addEventListener("input", () => setPat(patInput.value.trim(), patRemember.checked));
+  patRemember.addEventListener("change", () => setPat(patInput.value.trim(), patRemember.checked));
 
   // Allow ?url=... deep-link
   const params = new URLSearchParams(window.location.search);
