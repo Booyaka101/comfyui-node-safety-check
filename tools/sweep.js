@@ -36,9 +36,32 @@
 
 "use strict";
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const https = require("https");
 const { URL } = require("url");
+
+// Read PAT from env, then fall back to ~/.github_sweep_token. Handles
+// UTF-8, UTF-8-with-BOM, and UTF-16-LE-with-BOM (PowerShell's `Out-File`
+// default on Windows). Token is never echoed, never written to output,
+// never sent anywhere except api.github.com's Authorization header.
+function loadToken() {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN.trim();
+  const fp = path.join(os.homedir(), ".github_sweep_token");
+  if (!fs.existsSync(fp)) return "";
+  const buf = fs.readFileSync(fp);
+  let s;
+  if (buf[0] === 0xFF && buf[1] === 0xFE) {
+    s = buf.slice(2).toString("utf16le");
+  } else if (buf[0] === 0xFE && buf[1] === 0xFF) {
+    s = buf.slice(2).swap16().toString("utf16le");
+  } else if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+    s = buf.slice(3).toString("utf8");
+  } else {
+    s = buf.toString("utf8");
+  }
+  return s.replace(/[^\x21-\x7E]/g, "").trim();
+}
 
 // ----- Args -----
 const ARGS = (() => {
@@ -53,11 +76,9 @@ const ARGS = (() => {
   return opts;
 })();
 
-const TOKEN = process.env.GITHUB_TOKEN || "";
+const TOKEN = loadToken();
 if (!TOKEN) {
-  console.error("FATAL: set GITHUB_TOKEN env var to a GitHub Personal Access Token before running.");
-  console.error("       Create one at https://github.com/settings/tokens with no scopes (fine-grained)");
-  console.error("       or 'public_repo' read (classic). Token stays in env only — never written to disk.");
+  console.error("FATAL: provide a GitHub PAT via GITHUB_TOKEN env var or ~/.github_sweep_token file.");
   process.exit(2);
 }
 
