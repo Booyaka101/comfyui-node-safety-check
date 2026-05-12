@@ -413,9 +413,9 @@
     },
     {
       id: "pickle-loads",
-      severity: "crit",
+      severity: "high",
       title: "Pickle deserialization",
-      why: "pickle.loads() can execute arbitrary code embedded in the byte stream. Avoid on any data you didn't produce.",
+      why: "pickle.loads / pickle.load executes arbitrary code embedded in the byte stream. Universal in ML for loading model checkpoints — usually safe with files you produced, dangerous with anything downloaded from the community. Worth a manual look at where the bytes come from.",
       patterns: [{ regex: /\b(?:pickle|cPickle|_pickle|dill)\.(?:loads?|Unpickler)\b/g }]
     },
     {
@@ -477,7 +477,12 @@
       severity: "high",
       title: "Direct exec / eval / compile call",
       why: "Direct use of exec, eval, or compile lets arbitrary strings become executable code. Often legitimate, but always worth a manual look.",
-      patterns: [{ regex: /(?:^|[^.\w])(exec|eval|compile)\s*\(/g }]
+      // Lookbehind is positioned AFTER the leading non-word char so it
+      // examines the four characters ending at the identifier (i.e. it
+      // sees the "def " in `def eval(self):`). torch.nn.Module subclasses
+      // commonly define `def eval(self):`, which is a method definition,
+      // not a call to Python's builtin eval.
+      patterns: [{ regex: /(?:^|[^.\w])(?<!def\s)(exec|eval|compile)\s*\(/g }]
     },
     {
       id: "os-system",
