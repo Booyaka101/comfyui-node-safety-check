@@ -549,26 +549,25 @@
       patterns: [{ regex: /https?:\/\/(?:[a-z]+\.)?(?:pastebin\.com|hastebin\.com|paste\.ee|0bin\.net|rentry\.co|gist\.githubusercontent\.com\/[^\/]+\/[a-f0-9]{20,}\/raw)/g, target: "string" }]
     },
 
-    // Medium: things that warrant a look
+    // Medium: things that warrant a look. We intentionally do NOT flag bare
+    // `subprocess.run([...])` without shell=True — that's the *safe* form
+    // recommended by Python's own docs (argv list, no shell expansion), and
+    // every node that calls ffmpeg/git would light up the report, drowning
+    // out real signal. The actually-dangerous subprocess uses are caught by
+    // `subprocess-shell-true`, `subprocess-getoutput`, `os-system`, and
+    // `pip-runtime`.
     {
-      id: "subprocess-no-shell",
+      id: "socket-raw-connect",
       severity: "warn",
-      title: "subprocess call (no shell=True)",
-      why: "Often legitimate (ffmpeg, git, etc.) but worth confirming what's being run.",
-      patterns: [{ regex: /\bsubprocess\.(?:run|call|check_call|check_output|Popen)\s*\(/g }]
-    },
-    {
-      id: "socket-connect",
-      severity: "warn",
-      title: "Raw socket connection",
-      why: "Raw socket use bypasses high-level libraries. Often legitimate; verify the destination.",
-      patterns: [{ regex: /\bsocket\.socket\s*\(/g }]
+      title: "Raw socket connect()",
+      why: "Raw socket connect() to an arbitrary host bypasses higher-level libraries. Often legitimate (peer-to-peer features) but the destination is worth verifying.",
+      patterns: [{ regex: /\.connect\s*\(\s*\(\s*['"]/g }]
     },
     {
       id: "urllib-urlopen",
       severity: "warn",
       title: "urllib.request.urlopen",
-      why: "Direct URL fetch. Worth confirming the host is one you trust (HuggingFace, GitHub).",
+      why: "Direct URL fetch. Worth confirming the host is one you trust (HuggingFace, GitHub, civitai).",
       patterns: [{ regex: /\burllib(?:\.request)?\.urlopen\b/g }]
     },
     {
