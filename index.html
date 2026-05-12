@@ -1,0 +1,902 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ComfyUI Node Safety Check</title>
+  <meta name="description" content="Static-analysis safety check for ComfyUI custom nodes. Paste a GitHub URL and get a risk score before installing. Runs entirely in your browser — no upload." />
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --bg-grad-b: #131826;
+      --fg: #eaecf2;
+      --muted: #8a93a4;
+      --accent: #7aa5ff;
+      --accent-soft: rgba(122, 165, 255, 0.12);
+      --accent-strong: #5d8cf2;
+      --ok: #5cd684;
+      --ok-soft: rgba(92, 214, 132, 0.12);
+      --warn: #f4b65a;
+      --warn-soft: rgba(244, 182, 90, 0.12);
+      --high: #ff8d5e;
+      --high-soft: rgba(255, 141, 94, 0.12);
+      --crit: #ff5d6c;
+      --crit-soft: rgba(255, 93, 108, 0.14);
+      --panel: #161a23;
+      --panel-2: #1d2230;
+      --border: #232938;
+      --border-soft: #1b2030;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: radial-gradient(ellipse 80% 60% at 50% -10%, var(--bg-grad-b), var(--bg) 60%);
+      color: var(--fg);
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      letter-spacing: -0.005em;
+      min-height: 100%;
+      padding: 56px 20px 96px;
+    }
+    main { max-width: 880px; margin: 0 auto; }
+
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+    .brand .mark {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--crit), var(--high));
+      display: grid; place-items: center;
+      box-shadow: 0 4px 16px rgba(255, 93, 108, 0.25);
+    }
+    .brand .mark svg { width: 18px; height: 18px; color: #0b0d12; }
+    .brand .name { font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+    .brand .gh { margin-left: auto; color: var(--muted); font-size: 13px; text-decoration: none; }
+    .brand .gh:hover { color: var(--fg); }
+
+    h1 { font-size: 30px; line-height: 1.2; margin: 0 0 8px; font-weight: 700; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); font-size: 15px; margin: 0 0 14px; max-width: 720px; }
+
+    .disclaimer {
+      background: var(--warn-soft);
+      border: 1px solid rgba(244, 182, 90, 0.3);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--fg);
+      margin: 0 0 32px;
+      line-height: 1.6;
+    }
+    .disclaimer b { color: var(--warn); }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    .tab {
+      background: transparent;
+      border: 1px solid transparent;
+      padding: 8px 14px;
+      border-radius: 8px 8px 0 0;
+      color: var(--muted);
+      cursor: pointer;
+      font: 500 13.5px inherit;
+    }
+    .tab.active {
+      background: var(--panel);
+      border-color: var(--border);
+      border-bottom-color: var(--panel);
+      color: var(--fg);
+    }
+    .tab:hover:not(.active) { color: var(--fg); }
+
+    .input-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 0 12px 12px 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .input-panel.url-mode { display: block; }
+    .input-panel.hidden { display: none; }
+
+    label.field { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
+    input[type=text], input[type=url], textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--fg);
+      font: 14px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    input:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 180px; font-size: 13px; }
+
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .scan-btn {
+      background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+      color: #08111f;
+      border: 0;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font: 600 14px inherit;
+      cursor: pointer;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.1) inset, 0 2px 8px rgba(122, 165, 255, 0.18);
+    }
+    .scan-btn:hover { box-shadow: 0 1px 0 rgba(255,255,255,0.1) inset, 0 4px 14px rgba(122, 165, 255, 0.28); }
+    .scan-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .drop {
+      display: block;
+      width: 100%;
+      border: 1.5px dashed var(--border);
+      border-radius: 12px;
+      padding: 40px 24px;
+      text-align: center;
+      cursor: pointer;
+      background: var(--panel-2);
+    }
+    .drop:hover { border-color: #34405a; }
+    .drop.hover { border-color: var(--accent); }
+    .drop .big { font-size: 15px; margin: 0 0 4px; }
+    .drop .small { color: var(--muted); font-size: 13px; margin: 0; }
+    input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+    /* Trust strip */
+    .trust {
+      font-size: 12.5px; color: var(--muted);
+      display: flex; gap: 18px; flex-wrap: wrap;
+      margin: 12px 0 0;
+      padding: 10px 0 0;
+      border-top: 1px solid var(--border-soft);
+    }
+    .trust span { display: inline-flex; align-items: center; gap: 6px; }
+    .trust span svg { width: 13px; height: 13px; color: var(--ok); }
+
+    /* Status */
+    .status-line {
+      font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted);
+      margin: 8px 0;
+      min-height: 18px;
+    }
+    .status-line a { color: var(--accent); text-decoration: none; }
+    .status-line.err { color: var(--crit); }
+
+    /* Verdict */
+    .verdict {
+      border-radius: 14px;
+      padding: 22px 24px;
+      margin-bottom: 18px;
+      border: 1px solid var(--border);
+    }
+    .verdict.crit { background: var(--crit-soft); border-color: rgba(255, 93, 108, 0.35); }
+    .verdict.high { background: var(--high-soft); border-color: rgba(255, 141, 94, 0.32); }
+    .verdict.warn { background: var(--warn-soft); border-color: rgba(244, 182, 90, 0.32); }
+    .verdict.ok   { background: var(--ok-soft);   border-color: rgba(92, 214, 132, 0.32); }
+    .verdict-head { display: flex; align-items: center; gap: 12px; }
+    .verdict-badge {
+      font: 700 12px inherit;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(0,0,0,0.25);
+    }
+    .verdict.crit .verdict-badge { color: var(--crit); }
+    .verdict.high .verdict-badge { color: var(--high); }
+    .verdict.warn .verdict-badge { color: var(--warn); }
+    .verdict.ok   .verdict-badge { color: var(--ok); }
+    .verdict h2 { margin: 0; font-size: 18px; }
+    .verdict p { margin: 8px 0 0; font-size: 14px; color: var(--fg); }
+    .verdict .meta { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--muted); }
+    .verdict .meta b { color: var(--fg); }
+
+    /* Findings */
+    .findings { display: flex; flex-direction: column; gap: 10px; }
+    .finding {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: flex; gap: 14px; align-items: flex-start;
+    }
+    .finding .sev {
+      flex: 0 0 88px;
+      font: 700 11px inherit;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 4px 8px;
+      border-radius: 6px;
+      text-align: center;
+      align-self: flex-start;
+      margin-top: 2px;
+    }
+    .finding.crit .sev { color: var(--crit); background: var(--crit-soft); }
+    .finding.high .sev { color: var(--high); background: var(--high-soft); }
+    .finding.warn .sev { color: var(--warn); background: var(--warn-soft); }
+    .finding.info .sev { color: var(--accent); background: var(--accent-soft); }
+    .finding-body { flex: 1; min-width: 0; }
+    .finding h3 { font-size: 14.5px; margin: 0 0 4px; font-weight: 600; }
+    .finding .where { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); margin: 0 0 6px; word-break: break-all; }
+    .finding .where a { color: var(--accent); text-decoration: none; }
+    .finding .why { font-size: 13.5px; color: var(--muted); margin: 0 0 8px; line-height: 1.55; }
+    .finding pre {
+      font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: var(--bg);
+      border: 1px solid var(--border-soft);
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin: 0;
+      overflow-x: auto;
+      color: #d0d4dd;
+    }
+    .finding pre mark { background: rgba(255, 141, 94, 0.25); color: var(--high); border-radius: 3px; padding: 0 2px; }
+
+    .empty-state { color: var(--muted); font-size: 14px; padding: 28px 0; text-align: center; }
+
+    /* Help */
+    .help { margin-top: 48px; padding-top: 28px; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 13.5px; line-height: 1.65; }
+    .help h3 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin: 24px 0 6px; color: var(--fg); }
+    .help h3:first-child { margin-top: 0; }
+    .help p { margin: 0 0 12px; }
+    .help a { color: var(--accent); text-decoration: none; }
+    .help a:hover { text-decoration: underline; }
+    code { font: 500 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel); padding: 1.5px 6px; border-radius: 4px; border: 1px solid var(--border-soft); color: var(--fg); }
+
+    @media (max-width: 600px) {
+      body { padding: 36px 16px 80px; }
+      h1 { font-size: 24px; }
+      .finding { flex-direction: column; gap: 8px; }
+      .finding .sev { align-self: flex-start; flex: 0 0 auto; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+      <span class="name">Node Safety Check</span>
+      <a class="gh" href="https://github.com/Booyaka101/comfyui-node-safety-check" target="_blank" rel="noopener">source ↗</a>
+    </div>
+
+    <h1>Vet a ComfyUI custom node before you install it.</h1>
+    <p class="sub">Static analysis for ComfyUI custom-node repos. Paste a GitHub URL, source, or upload files — get a risk score with line-level findings. Everything runs locally in your browser; no source is uploaded.</p>
+
+    <div class="disclaimer">
+      <b>What this is and isn't.</b> Static analysis catches patterns associated with documented attacks (credential stealers, cryptominers, drive-by downloaders). It <b>cannot</b> evaluate runtime behaviour or detect threats that obfuscate beyond simple patterns. Treat a clean result as a quick checkpoint, not a guarantee. For high-stakes installs, read the source yourself.
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="url">GitHub URL</button>
+      <button class="tab" data-tab="paste">Paste source</button>
+      <button class="tab" data-tab="upload">Upload files</button>
+    </div>
+
+    <div class="input-panel" id="panel-url">
+      <label class="field" for="url-input">GitHub repository or file URL</label>
+      <div class="row">
+        <input id="url-input" type="url" placeholder="https://github.com/owner/comfyui-some-node" autocomplete="off" spellcheck="false" />
+        <button class="scan-btn" id="scan-url">Scan</button>
+      </div>
+      <div class="trust">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>No data leaves your browser</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Reads public GitHub files only</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Open-source, auditable</span>
+      </div>
+    </div>
+
+    <div class="input-panel hidden" id="panel-paste">
+      <label class="field" for="paste-input">Paste Python source (or any of: <code>setup.py</code>, <code>pyproject.toml</code>, <code>requirements.txt</code>)</label>
+      <textarea id="paste-input" spellcheck="false" placeholder="# paste the file content here"></textarea>
+      <div style="margin-top: 12px;"><button class="scan-btn" id="scan-paste">Scan</button></div>
+    </div>
+
+    <div class="input-panel hidden" id="panel-upload">
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept=".py,.toml,.txt,.cfg,.ini,.json,.zip" multiple />
+        <p class="big">Drop <code>.py</code> / <code>.toml</code> / <code>requirements.txt</code> files here, or click to choose.</p>
+        <p class="small">Multiple files OK. Zips not auto-extracted yet — paste files individually for now.</p>
+      </label>
+    </div>
+
+    <div class="status-line" id="status"></div>
+    <div id="output"></div>
+
+    <div class="help">
+      <h3>What gets checked</h3>
+      <p>Patterns associated with documented ComfyUI custom-node attacks (LLMVISION credential stealer, Akira stealer in Upscaler_4K, cryptominer botnet campaigns):</p>
+      <ul style="margin: 0 0 12px; padding-left: 18px;">
+        <li><b>Critical:</b> obfuscated <code>exec</code>/<code>eval</code> chains (base64 → exec, chr-assembled strings), <code>pickle.loads</code> on untrusted input, <code>marshal.loads</code>, exfiltration of browser profile / SSH / keychain data, writes to OS autostart paths, hardcoded crypto-wallet addresses.</li>
+        <li><b>High:</b> <code>os.system</code>, <code>subprocess</code> with <code>shell=True</code> + variable input, <code>ctypes</code> native DLL loading, runtime <code>pip install</code>, importlib with variable arg.</li>
+        <li><b>Medium:</b> <code>subprocess</code> without shell, raw <code>socket</code> use, network calls in <code>setup.py</code>, URLs to non-mainstream hosts (pastebin, discord webhooks, raw IPs).</li>
+        <li><b>Info:</b> unpinned dependencies, GitHub-URL dependencies (rug-pull risk), <code>requests</code>/<code>urllib</code> imports.</li>
+      </ul>
+
+      <h3>Limits</h3>
+      <p>Static analysis cannot evaluate runtime behaviour. Specifically: code that fetches a payload at runtime, evaluates strings reconstructed via arithmetic, or hides logic in a compiled <code>.pyc</code> bundled with the node will not be caught. The official ComfyUI security review (private Discord channel) and manual code review remain the gold standards.</p>
+
+      <h3>Why this exists</h3>
+      <p>The <a href="https://github.com/ashish-aesthisia/Comfy-Spaces/discussions/6">Comfy-Spaces safety scanner proposal</a> has been open since January 2026 with no shipped browser-based tool. Multiple real attacks have been published (<a href="https://www.vpnmentor.com/news/comfyui-malicious-custom-node/">LLMVISION</a>, <a href="https://thehackernews.com/2026/04/over-1000-exposed-comfyui-instances.html">cryptominer botnet</a>, <a href="https://github.com/Comfy-Org/ComfyUI/issues/11791">Upscaler_4K + Akira stealer</a>). This page fills the "I want a quick check before I install this random node" gap that CLI-only tools (<a href="https://github.com/christian-byrne/custom-nodes-security-scan">christian-byrne/custom-nodes-security-scan</a>) don't reach.</p>
+    </div>
+  </main>
+
+  <script>
+  "use strict";
+
+  // ---------------------------------------------------------------------------
+  // Rule definitions. Each rule has:
+  //   id        - stable identifier
+  //   severity  - crit | high | warn | info
+  //   title     - short human label
+  //   why       - one-sentence rationale
+  //   patterns  - array of { regex, contextFile? } objects
+  //               contextFile narrows to a filename glob ('setup.py', etc.)
+  // ---------------------------------------------------------------------------
+  const RULES = [
+    // Critical: dynamic execution
+    {
+      id: "exec-base64",
+      severity: "crit",
+      title: "Obfuscated dynamic execution via base64",
+      why: "Decoding a base64 string and exec'ing it is a hallmark of malware trying to hide its payload from casual review.",
+      patterns: [{ regex: /(?:exec|eval|compile)\s*\(\s*[^)]*\b(?:base64|b64)[._]?(?:b64)?decode\b/g }]
+    },
+    {
+      id: "exec-chr-assembly",
+      severity: "crit",
+      title: "Obfuscated execution via chr-assembled strings",
+      why: "Building a string from chr(...) + chr(...) and passing it to exec/eval is a known obfuscation pattern.",
+      patterns: [{ regex: /(?:exec|eval|compile)\s*\(\s*[^)]*\bchr\s*\(\s*\d+\s*\)\s*\+/g }]
+    },
+    {
+      id: "pickle-loads",
+      severity: "crit",
+      title: "Pickle deserialization",
+      why: "pickle.loads() can execute arbitrary code embedded in the byte stream. Avoid on any data you didn't produce.",
+      patterns: [{ regex: /\b(?:pickle|cPickle|_pickle|dill)\.(?:loads?|Unpickler)\b/g }]
+    },
+    {
+      id: "marshal-loads",
+      severity: "crit",
+      title: "Marshal deserialization",
+      why: "marshal.loads loads compiled Python objects and can execute arbitrary code, similar to pickle.",
+      patterns: [{ regex: /\bmarshal\.loads?\b/g }]
+    },
+    {
+      id: "browser-profile-exfil",
+      severity: "crit",
+      title: "Access to browser profile / credential storage",
+      why: "Reading Chrome / Firefox / Edge / Brave profile directories is a credential-stealer signature. Legitimate nodes have no reason to touch these paths.",
+      patterns: [
+        { regex: /["'][^"']*(?:Google\/Chrome\/User Data|Mozilla\/Firefox\/Profiles|BraveSoftware\/Brave-Browser|Microsoft\/Edge\/User Data|Login Data|Cookies|key\d?\.db|signons\.sqlite|logins\.json)[^"']*["']/g, target: "string" }
+      ]
+    },
+    {
+      id: "ssh-key-exfil",
+      severity: "crit",
+      title: "Access to SSH or GPG key files",
+      why: "Reading ~/.ssh or ~/.gnupg is associated with credential exfiltration. Custom nodes should not be touching these.",
+      patterns: [
+        { regex: /["'][^"']*(?:\.ssh\/(?:id_rsa|id_ed25519|id_ecdsa|id_dsa|authorized_keys|known_hosts|config)|\.gnupg\/)[^"']*["']/g, target: "string" }
+      ]
+    },
+    {
+      id: "autostart-write",
+      severity: "crit",
+      title: "Writes to OS autostart / persistence path",
+      why: "Writing to autostart directories or system services is a persistence-mechanism signature for malware.",
+      patterns: [
+        { regex: /["'][^"']*(?:\.config\/autostart|Startup\\Programs|\/etc\/systemd\/system|LaunchAgents|LaunchDaemons|HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run)[^"']*["']/g, target: "string" }
+      ]
+    },
+    {
+      id: "discord-webhook",
+      severity: "crit",
+      title: "Discord webhook URL",
+      why: "Hardcoded Discord webhooks are a common exfiltration channel in malicious nodes (data POSTed to the attacker's webhook).",
+      patterns: [{ regex: /https?:\/\/(?:[a-z]+\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+/g, target: "string" }]
+    },
+    {
+      id: "crypto-wallet-address",
+      severity: "crit",
+      title: "Hardcoded crypto wallet address",
+      why: "Hardcoded BTC / ETH / Monero addresses in a generative-AI node are a strong cryptomining or theft signal.",
+      patterns: [
+        { regex: /\b[48][0-9AB][1-9A-HJ-NP-Za-km-z]{93}\b/g, target: "string" },
+        { regex: /\bbc1[02-9ac-hj-np-z]{6,87}\b/g, target: "string" },
+        { regex: /\b0x[a-fA-F0-9]{40}\b/g, target: "string" }
+      ]
+    },
+
+    // High: dangerous calls
+    {
+      id: "exec-eval-direct",
+      severity: "high",
+      title: "Direct exec / eval / compile call",
+      why: "Direct use of exec, eval, or compile lets arbitrary strings become executable code. Often legitimate, but always worth a manual look.",
+      patterns: [{ regex: /(?:^|[^.\w])(exec|eval|compile)\s*\(/g }]
+    },
+    {
+      id: "os-system",
+      severity: "high",
+      title: "Shell command via os.system / os.popen",
+      why: "os.system runs a string in the shell. If any user-controlled or downloaded data reaches the string, it's command injection.",
+      patterns: [{ regex: /\bos\.(?:system|popen|spawn[lev]p?)\b/g }]
+    },
+    {
+      id: "subprocess-shell-true",
+      severity: "high",
+      title: "subprocess with shell=True",
+      why: "Running through the shell with variable input is command-injection-prone and a frequent malware pattern (curl | sh chains).",
+      patterns: [{ regex: /subprocess\.(?:run|call|check_call|check_output|Popen|getoutput)\s*\([^)]*shell\s*=\s*True/g }]
+    },
+    {
+      id: "subprocess-getoutput",
+      severity: "high",
+      title: "subprocess.getoutput",
+      why: "Implicit shell invocation. Same risks as shell=True.",
+      patterns: [{ regex: /\bsubprocess\.getoutput\b/g }]
+    },
+    {
+      id: "ctypes-dll",
+      severity: "high",
+      title: "Loading native DLLs via ctypes",
+      why: "ctypes.CDLL / WinDLL loads native code with no Python-level sandbox. Legitimate for some scientific nodes; suspicious for image-gen nodes.",
+      patterns: [{ regex: /\bctypes\.(?:CDLL|WinDLL|cdll\.LoadLibrary|windll\.LoadLibrary|OleDLL|PyDLL)\b/g }]
+    },
+    {
+      id: "importlib-variable",
+      severity: "high",
+      title: "importlib with computed module name",
+      why: "Importing a module whose name is built at runtime can hide what's actually loaded.",
+      patterns: [{ regex: /\bimportlib\.import_module\s*\(\s*[a-zA-Z_]\w*\s*[,)]/g }]
+    },
+    {
+      id: "builtins-getattr",
+      severity: "high",
+      title: "Dynamic builtin lookup via getattr(__builtins__,...)",
+      why: "getattr(__builtins__, ...) with a variable name is used to fetch exec/eval indirectly and bypass simple grep checks.",
+      patterns: [{ regex: /getattr\s*\(\s*__builtins__\s*,\s*[^"'][^,)]*[,)]/g }]
+    },
+    {
+      id: "pip-runtime",
+      severity: "high",
+      title: "Runtime pip install",
+      why: "Installing packages at runtime via subprocess pulls additional code into your environment without review — used by Akira-stealer staging.",
+      patterns: [
+        { regex: /subprocess\.[\w]+\s*\(\s*\[[^\]]*['"]pip['"]\s*,\s*['"]install['"]/g, target: "string" },
+        { regex: /subprocess\.[\w]+\s*\(\s*['"][^'"]*\bpip\s+install\b/g, target: "string" },
+        { regex: /pip\._internal\.cli\.main\.main\b/g }
+      ]
+    },
+
+    // High: network exfil / drive-by
+    {
+      id: "raw-ip-url",
+      severity: "high",
+      title: "Hardcoded raw IP address in URL or string",
+      why: "Raw-IP URLs are a strong signal of attacker-controlled infrastructure (legitimate code uses domains).",
+      patterns: [{ regex: /https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:\/[^\s"'`]*)?/g, target: "string" }]
+    },
+    {
+      id: "pastebin-url",
+      severity: "high",
+      title: "Pastebin / paste-service URL",
+      why: "Pastebin / hastebin URLs are commonly used to fetch second-stage payloads.",
+      patterns: [{ regex: /https?:\/\/(?:[a-z]+\.)?(?:pastebin\.com|hastebin\.com|paste\.ee|0bin\.net|rentry\.co|gist\.githubusercontent\.com\/[^\/]+\/[a-f0-9]{20,}\/raw)/g, target: "string" }]
+    },
+
+    // Medium: things that warrant a look
+    {
+      id: "subprocess-no-shell",
+      severity: "warn",
+      title: "subprocess call (no shell=True)",
+      why: "Often legitimate (ffmpeg, git, etc.) but worth confirming what's being run.",
+      patterns: [{ regex: /\bsubprocess\.(?:run|call|check_call|check_output|Popen)\s*\(/g }]
+    },
+    {
+      id: "socket-connect",
+      severity: "warn",
+      title: "Raw socket connection",
+      why: "Raw socket use bypasses high-level libraries. Often legitimate; verify the destination.",
+      patterns: [{ regex: /\bsocket\.socket\s*\(/g }]
+    },
+    {
+      id: "urllib-urlopen",
+      severity: "warn",
+      title: "urllib.request.urlopen",
+      why: "Direct URL fetch. Worth confirming the host is one you trust (HuggingFace, GitHub).",
+      patterns: [{ regex: /\burllib(?:\.request)?\.urlopen\b/g }]
+    },
+    {
+      id: "setup-py-network",
+      severity: "warn",
+      title: "Network call inside setup.py",
+      why: "Network access during install lets the package fetch arbitrary code as part of setup. Used by malicious package campaigns.",
+      patterns: [
+        { regex: /\b(?:requests|urllib|httpx|http\.client|socket)\b/g, contextFile: /(?:^|\/)setup\.py$/ }
+      ]
+    },
+    {
+      id: "setup-py-subprocess",
+      severity: "warn",
+      title: "subprocess inside setup.py",
+      why: "Shelling out from setup.py runs arbitrary commands at install time. Almost always avoidable.",
+      patterns: [
+        { regex: /\bsubprocess\b/g, contextFile: /(?:^|\/)setup\.py$/ }
+      ]
+    },
+    {
+      id: "long-base64-string",
+      severity: "warn",
+      title: "Long base64-shaped literal",
+      why: "Large embedded base64 blobs sometimes hide compressed payloads. Often legitimate (image data, etc.) — worth a glance.",
+      patterns: [{ regex: /["'`][A-Za-z0-9+/]{200,}={0,2}["'`]/g, target: "string" }]
+    },
+
+    // Info: dependency hygiene
+    {
+      id: "git-url-dep",
+      severity: "info",
+      title: "Dependency pulled from a git URL",
+      why: "Git-URL deps can be force-pushed to change what gets installed (rug-pull). Prefer pinned PyPI versions.",
+      patterns: [
+        { regex: /^[^#\n]*\b(?:git\+(?:https?|ssh):\/\/|@\s*git\+)/gm, contextFile: /(?:requirements[^\/]*\.txt|pyproject\.toml|setup\.cfg)$/ }
+      ]
+    },
+    {
+      id: "unpinned-dep",
+      severity: "info",
+      title: "Unpinned dependency",
+      why: "Without a version pin, the install picks whatever the index serves at install time. Less of a security issue than a reproducibility one.",
+      patterns: [
+        { regex: /^[ \t]*(?!#)[A-Za-z][\w.\-]*\s*$/gm, contextFile: /(?:^|\/)requirements[^\/]*\.txt$/ }
+      ]
+    }
+  ];
+
+  // ---------------------------------------------------------------------------
+  // Python source cleaner. Removes string contents and # comments while
+  // preserving line breaks and overall offsets, so regex matches still report
+  // the correct line numbers. Triple-quoted strings handled with a tiny state
+  // machine.
+  // ---------------------------------------------------------------------------
+  function stripStringsAndComments(src) {
+    let out = "";
+    let i = 0;
+    const n = src.length;
+    let inTriple = null; // null or '"""' or "'''"
+    let inSingle = null; // null or '"' or "'"
+    while (i < n) {
+      const c = src[i], c3 = src.slice(i, i + 3);
+      if (inTriple) {
+        if (c3 === inTriple) { out += inTriple; i += 3; inTriple = null; }
+        else { out += (c === "\n" ? "\n" : " "); i++; }
+        continue;
+      }
+      if (inSingle) {
+        if (c === "\\") { out += "  "; i += 2; continue; }
+        if (c === inSingle) { out += c; i++; inSingle = null; continue; }
+        out += (c === "\n" ? "\n" : " ");
+        i++;
+        continue;
+      }
+      if (c3 === '"""' || c3 === "'''") { out += c3; i += 3; inTriple = c3; continue; }
+      if (c === '"' || c === "'") { out += c; i++; inSingle = c; continue; }
+      if (c === "#") {
+        while (i < n && src[i] !== "\n") i++;
+        out += "#"; // keep the # so column offsets vaguely match
+        continue;
+      }
+      out += c;
+      i++;
+    }
+    return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Run all rules against one file's source. Returns an array of findings.
+  // For pattern matching: we run regexes against the ORIGINAL source (so URLs
+  // and string literals are seen) for rules that scan strings, but for rules
+  // that target code (exec, subprocess, etc.) we use the cleaned variant.
+  //
+  // To keep this simple: every rule scans both. Findings include the line and
+  // the raw excerpt from the original source.
+  // ---------------------------------------------------------------------------
+  function offsetToLine(src, offset) {
+    let line = 1;
+    for (let i = 0; i < offset && i < src.length; i++) {
+      if (src[i] === "\n") line++;
+    }
+    return line;
+  }
+  function lineSlice(src, line) {
+    const lines = src.split("\n");
+    return lines[line - 1] || "";
+  }
+
+  function scanFile(filename, src) {
+    if (typeof src !== "string" || !src) return [];
+    const cleaned = stripStringsAndComments(src);
+    const findings = [];
+    const seen = new Set();
+
+    // Each pattern declares pat.target: "code" (scan cleaned — ignores
+    // matches inside string literals / comments) or "string" (scan original
+    // — for URLs, file paths, wallet addresses that *live* in literals).
+    // Defaults to "code". This avoids false positives like
+    // `logging.info("...compile (nightly)")` triggering an exec/compile rule.
+    for (const rule of RULES) {
+      for (const pat of rule.patterns) {
+        if (pat.contextFile && !pat.contextFile.test(filename)) continue;
+        const flags = pat.regex.flags.includes("g") ? pat.regex.flags : pat.regex.flags + "g";
+        const target = pat.target === "string" ? src : cleaned;
+        const re = new RegExp(pat.regex.source, flags);
+        let m;
+        while ((m = re.exec(target)) !== null) {
+          if (m[0].length === 0) { re.lastIndex++; continue; }
+          const line = offsetToLine(target, m.index);
+          const key = `${rule.id}|${filename}|${line}|${m[0]}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          findings.push({
+            ruleId: rule.id,
+            severity: rule.severity,
+            title: rule.title,
+            why: rule.why,
+            filename,
+            line,
+            match: m[0],
+            excerpt: lineSlice(src, line).trim()
+          });
+        }
+      }
+    }
+    return findings;
+  }
+
+  // ---------------------------------------------------------------------------
+  // GitHub URL parsing + repo fetch via API + raw content.
+  // Anonymous: 60 API requests / hour. We use only 2 API calls per scan
+  // (meta + tree) and pull file contents from raw.githubusercontent.com which
+  // doesn't count against the rate limit.
+  // ---------------------------------------------------------------------------
+  function parseGithubUrl(url) {
+    const u = url.trim();
+    let m;
+    // Repo root: github.com/owner/repo[.git][/tree/branch[/path]]
+    if ((m = u.match(/^https?:\/\/github\.com\/([^\/\s]+)\/([^\/\s#?]+?)(?:\.git)?(?:\/(?:tree|blob)\/([^\/\s]+))?(?:\/(.+?))?(?:[#?].*)?$/))) {
+      return { owner: m[1], repo: m[2].replace(/\.git$/, ""), ref: m[3] || null, path: m[4] || "" };
+    }
+    return null;
+  }
+
+  async function fetchRepoTree(owner, repo, ref) {
+    setStatus(`Fetching repo metadata for <code>${owner}/${repo}</code> …`);
+    const metaRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
+    if (!metaRes.ok) {
+      const msg = metaRes.status === 404 ? "repo not found or private" :
+                  metaRes.status === 403 ? "GitHub API rate-limit reached (try again later, or use Paste source mode)" :
+                  `GitHub returned ${metaRes.status}`;
+      throw new Error(msg);
+    }
+    const meta = await metaRes.json();
+    const branch = ref || meta.default_branch;
+    setStatus(`Listing files in <code>${owner}/${repo}@${branch}</code> …`);
+    const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`);
+    if (!treeRes.ok) {
+      throw new Error(treeRes.status === 403 ? "GitHub API rate-limit reached" : `tree fetch failed (${treeRes.status})`);
+    }
+    const tree = await treeRes.json();
+    return { branch, meta, tree };
+  }
+
+  function isRelevantPath(path) {
+    return /\.py$/i.test(path) ||
+      /(^|\/)(setup\.cfg|setup\.py|pyproject\.toml)$/i.test(path) ||
+      /(^|\/)requirements[^\/]*\.txt$/i.test(path);
+  }
+
+  async function fetchRawFile(owner, repo, branch, path) {
+    const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.text();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Renderer
+  // ---------------------------------------------------------------------------
+  function setStatus(html, isErr) {
+    const el = document.getElementById("status");
+    el.innerHTML = html;
+    el.classList.toggle("err", !!isErr);
+  }
+  function clearOutput() { document.getElementById("output").innerHTML = ""; }
+
+  const SEV_RANK = { crit: 0, high: 1, warn: 2, info: 3 };
+  const SEV_LABEL = { crit: "Critical", high: "High", warn: "Medium", info: "Info" };
+
+  function summarize(findings, fileCount, lineCount, repoInfo) {
+    const counts = { crit: 0, high: 0, warn: 0, info: 0 };
+    for (const f of findings) counts[f.severity]++;
+    let verdict, verdictText;
+    if (counts.crit > 0) {
+      verdict = "crit";
+      verdictText = "Critical patterns detected. Do not install without reading the source yourself.";
+    } else if (counts.high > 0) {
+      verdict = "high";
+      verdictText = "High-severity patterns present. Review each finding before installing.";
+    } else if (counts.warn > 0) {
+      verdict = "warn";
+      verdictText = "Some patterns worth a glance. Often these are legitimate (ffmpeg subprocess, etc.) — confirm context.";
+    } else {
+      verdict = "ok";
+      verdictText = "No high-risk patterns detected. Static analysis only — read the source for high-stakes installs.";
+    }
+
+    const out = document.getElementById("output");
+    const repoLine = repoInfo
+      ? `<span><b>${escapeHtml(repoInfo.owner + "/" + repoInfo.repo)}</b> · branch <code>${escapeHtml(repoInfo.branch)}</code></span>`
+      : "";
+
+    out.innerHTML = `
+      <div class="verdict ${verdict}">
+        <div class="verdict-head">
+          <div class="verdict-badge">${SEV_LABEL[verdict === "ok" ? "info" : verdict]} risk</div>
+          <h2>${verdictText}</h2>
+        </div>
+        <div class="meta">
+          ${repoLine}
+          <span><b>${fileCount}</b> files scanned</span>
+          <span><b>${lineCount.toLocaleString()}</b> lines analysed</span>
+          ${counts.crit ? `<span style="color:var(--crit)"><b>${counts.crit}</b> critical</span>` : ""}
+          ${counts.high ? `<span style="color:var(--high)"><b>${counts.high}</b> high</span>` : ""}
+          ${counts.warn ? `<span style="color:var(--warn)"><b>${counts.warn}</b> medium</span>` : ""}
+          ${counts.info ? `<span style="color:var(--accent)"><b>${counts.info}</b> info</span>` : ""}
+        </div>
+      </div>
+      <div class="findings" id="findings"></div>
+    `;
+
+    if (findings.length === 0) {
+      document.getElementById("findings").innerHTML = `<div class="empty-state">No findings.</div>`;
+      return;
+    }
+
+    findings.sort((a, b) => {
+      if (SEV_RANK[a.severity] !== SEV_RANK[b.severity]) return SEV_RANK[a.severity] - SEV_RANK[b.severity];
+      if (a.filename !== b.filename) return a.filename.localeCompare(b.filename);
+      return a.line - b.line;
+    });
+
+    const findingsEl = document.getElementById("findings");
+    for (const f of findings) {
+      const where = repoInfo
+        ? `<a href="https://github.com/${repoInfo.owner}/${repoInfo.repo}/blob/${repoInfo.branch}/${f.filename}#L${f.line}" target="_blank" rel="noopener">${escapeHtml(f.filename)}:${f.line}</a>`
+        : `${escapeHtml(f.filename)}:${f.line}`;
+      const highlighted = highlightMatch(f.excerpt, f.match);
+      const div = document.createElement("div");
+      div.className = `finding ${f.severity}`;
+      div.innerHTML = `
+        <div class="sev">${SEV_LABEL[f.severity]}</div>
+        <div class="finding-body">
+          <h3>${escapeHtml(f.title)}</h3>
+          <div class="where">${where}</div>
+          <p class="why">${escapeHtml(f.why)}</p>
+          <pre>${highlighted}</pre>
+        </div>
+      `;
+      findingsEl.appendChild(div);
+    }
+  }
+
+  function highlightMatch(line, match) {
+    const idx = line.indexOf(match);
+    if (idx < 0) return escapeHtml(line);
+    return escapeHtml(line.slice(0, idx)) + "<mark>" + escapeHtml(match) + "</mark>" + escapeHtml(line.slice(idx + match.length));
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Entry points
+  // ---------------------------------------------------------------------------
+  async function runUrlScan() {
+    clearOutput();
+    const raw = document.getElementById("url-input").value.trim();
+    if (!raw) { setStatus("Paste a GitHub repo URL above first.", true); return; }
+    const parsed = parseGithubUrl(raw);
+    if (!parsed) { setStatus("Couldn't parse that as a GitHub URL.", true); return; }
+    try {
+      const { branch, tree } = await fetchRepoTree(parsed.owner, parsed.repo, parsed.ref);
+      const relevant = (tree.tree || []).filter((n) => n.type === "blob" && isRelevantPath(n.path));
+      if (relevant.length === 0) {
+        setStatus(`No Python / dependency files found in this repo.`, true);
+        return;
+      }
+      setStatus(`Fetching ${relevant.length} files from <code>raw.githubusercontent.com</code> …`);
+      const results = await Promise.all(relevant.map(async (n) => {
+        const content = await fetchRawFile(parsed.owner, parsed.repo, branch, n.path);
+        return { path: n.path, content };
+      }));
+      const findings = [];
+      let totalLines = 0;
+      for (const { path, content } of results) {
+        if (!content) continue;
+        totalLines += (content.match(/\n/g) || []).length + 1;
+        findings.push(...scanFile(path, content));
+      }
+      setStatus(`Scanned ${results.length} files. ${findings.length} findings.`);
+      summarize(findings, results.length, totalLines, { owner: parsed.owner, repo: parsed.repo, branch });
+    } catch (err) {
+      setStatus(`Error: ${escapeHtml(err.message)}`, true);
+    }
+  }
+
+  function runPasteScan() {
+    clearOutput();
+    const src = document.getElementById("paste-input").value;
+    if (!src.trim()) { setStatus("Paste some source above first.", true); return; }
+    const findings = scanFile("(pasted)", src);
+    const lines = (src.match(/\n/g) || []).length + 1;
+    setStatus(`Scanned pasted source. ${findings.length} findings.`);
+    summarize(findings, 1, lines, null);
+  }
+
+  async function runFileScan(files) {
+    clearOutput();
+    const arr = Array.from(files);
+    if (arr.length === 0) return;
+    const findings = [];
+    let totalLines = 0;
+    for (const f of arr) {
+      if (/\.zip$/i.test(f.name)) {
+        setStatus(`Zips aren't auto-extracted yet — skipped <code>${escapeHtml(f.name)}</code>. Paste files individually for now.`, true);
+        continue;
+      }
+      const text = await f.text();
+      totalLines += (text.match(/\n/g) || []).length + 1;
+      findings.push(...scanFile(f.name, text));
+    }
+    setStatus(`Scanned ${arr.length} files. ${findings.length} findings.`);
+    summarize(findings, arr.length, totalLines, null);
+  }
+
+  // Wiring
+  document.querySelectorAll(".tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b === btn));
+      const which = btn.dataset.tab;
+      document.querySelectorAll(".input-panel").forEach((p) => p.classList.add("hidden"));
+      document.getElementById("panel-" + which).classList.remove("hidden");
+      setStatus("");
+      clearOutput();
+    });
+  });
+
+  document.getElementById("scan-url").addEventListener("click", runUrlScan);
+  document.getElementById("url-input").addEventListener("keydown", (e) => { if (e.key === "Enter") runUrlScan(); });
+  document.getElementById("scan-paste").addEventListener("click", runPasteScan);
+
+  const dropEl = document.getElementById("drop");
+  const fileEl = document.getElementById("file");
+  dropEl.addEventListener("dragover", (e) => { e.preventDefault(); dropEl.classList.add("hover"); });
+  dropEl.addEventListener("dragleave", () => dropEl.classList.remove("hover"));
+  dropEl.addEventListener("drop", (e) => { e.preventDefault(); dropEl.classList.remove("hover"); if (e.dataTransfer?.files) runFileScan(e.dataTransfer.files); });
+  fileEl.addEventListener("change", () => { if (fileEl.files) runFileScan(fileEl.files); });
+
+  // Allow ?url=... deep-link
+  const params = new URLSearchParams(window.location.search);
+  const initialUrl = params.get("url");
+  if (initialUrl) {
+    document.getElementById("url-input").value = initialUrl;
+    runUrlScan();
+  }
+  </script>
+</body>
+</html>
